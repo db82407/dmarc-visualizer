@@ -7,14 +7,13 @@ services:
     build: ./parsedmarc/
     command: >
       sh -c '
-        sed -e "s/ELASTIC_PASSWORD/${ELASTIC_PASSWORD}/"
-          /parsedmarc/parsedmarc.ini > /parsedmarc.ini;
+        sed -e "s/ELASTIC_PASSWORD/${ELASTIC_PASSWORD}/" \
+          /parsedmarc/parsedmarc.ini > /parsedmarc.ini
         exec parsedmarc -c /parsedmarc.ini --debug /input/*
-        '
+      '
     volumes:
       - ./parsedmarc:/parsedmarc:ro
       - ./input:/input:ro
-      - ./output:/output
     restart: on-failure
 
   kibana:
@@ -33,8 +32,8 @@ services:
             -H "Content-Type: application/json" \
             https://es01:9200/_security/user/kibana_system/_password \
             -d "{\"password\":\"${KIBANA_PASSWORD}\"}" | grep -q "^{}"; \
-          do sleep 10; \
-        done; \
+          do sleep 5; \
+        done
         exec /usr/local/bin/kibana-docker
       '
     volumes:

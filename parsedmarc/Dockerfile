@@ -8,7 +8,6 @@ RUN apk add --update --no-cache --virtual .build_deps build-base libffi-dev \
 # parsedmarc.ini is mounted at runtime (with password substitutions)
 #COPY parsedmarc.ini /
 
-# GeoLite2-Country.mmdb is mounted at runtime
-#COPY GeoLite2-Country.mmdb /usr/share/GeoIP/GeoLite2-Country.mmdb
+COPY GeoLite2-Country.mmdb /usr/share/GeoIP/GeoLite2-Country.mmdb
 
 #end
