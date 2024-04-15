@@ -1,27 +1,107 @@
 version: '3.5'
 services:
   parsedmarc:
-    build: ./parsedmarc/
-    volumes:
-      - ./files:/input:ro
-      - ./output_files:/output
-    command: parsedmarc -c /parsedmarc.ini /input/* --debug
     depends_on:
-      - elasticsearch
+      es01:
+        condition: service_healthy
+    build: ./parsedmarc/
+    command: >
+      sh -c '
+        sed -e "s/ELASTIC_PASSWORD/${ELASTIC_PASSWORD}/"
+          /parsedmarc/parsedmarc.ini > /parsedmarc.ini;
+        exec parsedmarc -c /parsedmarc.ini --debug /input/*
+        '
+    volumes:
+      - ./parsedmarc:/parsedmarc:ro
+      - ./input:/input:ro
+      - ./output:/output
     restart: on-failure
 
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.5
-    environment:
-      - discovery.type=single-node
+  kibana:
+    depends_on:
+      es01:
+        condition: service_healthy
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM docker.elastic.co/kibana/kibana:${STACK_VERSION}
+        COPY --from=${COMPOSE_PROJECT_NAME}-es01 /usr/share/elasticsearch/config/certs config/certs
+    command: >
+      sh -c '
+        until curl -s --cacert config/certs/ca/ca.crt \
+            -u "elastic:${ELASTIC_PASSWORD}" \
+            -H "Content-Type: application/json" \
+            https://es01:9200/_security/user/kibana_system/_password \
+            -d "{\"password\":\"${KIBANA_PASSWORD}\"}" | grep -q "^{}"; \
+          do sleep 10; \
+        done; \
+        exec /usr/local/bin/kibana-docker
+      '
     volumes:
-      - ./elastic_data:/usr/share/elasticsearch/data
-
-  grafana:
-    build: ./grafana/
+      - kibanadata:/usr/share/kibana/data
     ports:
-      - 3000:3000
-    user: root
+      - ${KIBANA_PORT}:5601
     environment:
-      GF_INSTALL_PLUGINS: grafana-piechart-panel,grafana-worldmap-panel
-      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      - SERVERNAME=kibana
+      - ELASTICSEARCH_HOSTS=https://es01:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${KIBANA_PASSWORD}
+      - ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES=config/certs/ca/ca.crt
+    mem_limit: ${MEM_LIMIT}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -s -I http://localhost:5601 | grep -q 'HTTP/1.1 302 Found'",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+
+
+  es01:
+    build:
+      args:
+        - STACK_VERSION=${STACK_VERSION}
+      context: ./elasticsearch/
+    volumes:
+      - es01data:/usr/share/elasticsearch/data
+    ports:
+      - ${ES_PORT}:9200
+    environment:
+      - node.name=es01
+      - cluster.name=${CLUSTER_NAME}
+      - cluster.initial_master_nodes=es01
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+      - bootstrap.memory_lock=true
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=true
+      - xpack.security.http.ssl.key=certs/es01/es01.key
+      - xpack.security.http.ssl.certificate=certs/es01/es01.crt
+      - xpack.security.http.ssl.certificate_authorities=certs/ca/ca.crt
+      - xpack.security.transport.ssl.enabled=true
+      - xpack.security.transport.ssl.key=certs/es01/es01.key
+      - xpack.security.transport.ssl.certificate=certs/es01/es01.crt
+      - xpack.security.transport.ssl.certificate_authorities=certs/ca/ca.crt
+      - xpack.security.transport.ssl.verification_mode=certificate
+      - xpack.license.self_generated.type=${LICENSE}
+    mem_limit: ${MEM_LIMIT}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -s --cacert config/certs/ca/ca.crt https://localhost:9200 | grep -q 'missing authentication credentials'",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+
+volumes:
+  kibanadata:
+  es01data:
+
+#end
